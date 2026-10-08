@@ -1,11 +1,11 @@
 import { OrderRepository } from "../repositories/OrderRepository.js";
 import { ReportService } from "../services/ReportService.js";
 import { peso, esc } from "../utils/format.js";
-
+ 
 const STATUSES = ["Pending", "Completed", "Cancelled"];
 const CHARGE_LABELS = ["Installation fee", "Transportation", "Other"];
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
+ 
 export class AdminPage {
   #root;
   #auth;
@@ -13,20 +13,20 @@ export class AdminPage {
   #orders = [];
   #tab = "orders";
   #filter = "All";
-
+ 
   constructor(root, auth) { this.#root = root; this.#auth = auth; }
-
+ 
   async render() {
     this.#orders = await this.#repo.listAll();
     this.#draw();
   }
-
+ 
   // Runs a change, reloads the orders, and redraws the page.
   async #run(action) {
     try { await action(); this.#orders = await this.#repo.listAll(); this.#draw(); }
     catch (err) { alert(err.message); }
   }
-
+ 
   #draw() {
     const t = ReportService.totals(this.#orders);
     const list = this.#orders.filter((o) => this.#filter === "All" || o.status === this.#filter);
@@ -48,19 +48,20 @@ export class AdminPage {
       <datalist id="labels">${CHARGE_LABELS.map((l) => `<option value="${l}">`).join("")}</datalist></main>`;
     this.#bind();
   }
-
+ 
   #ordersHtml(list) {
     return `<div class="tabs">${["All", ...STATUSES].map((s) =>
         `<button type="button" class="${this.#filter === s ? "on" : ""}" data-filter="${s}">${s}</button>`).join("")}</div>
       ${list.length ? list.map((o) => this.#orderHtml(o)).join("") : '<p class="note">No orders here yet.</p>'}`;
   }
-
+ 
   #orderHtml(o) {
     const charges = o.order_charges ?? [];
     return `<article class="card">
       <div class="ohead"><div><b>${esc(o.order_no)}</b> <span class="pill ${o.status.toLowerCase()}">${esc(o.status)}</span>
         <div class="note">${esc(o.customer_name)}${o.phone ? ", " + esc(o.phone) : ""}</div>
-        <div class="note">Agent: ${esc(o.agent_email ?? "not recorded")}, created ${esc(o.created_at.slice(0, 10))}, payment: ${esc(o.payment_method)}</div>
+        ${o.address ? `<div class="note">${esc(o.address)}</div>` : ""}
+        <div class="note">Agent: ${esc(o.agent_email ?? "not recorded")}, created ${esc(o.created_at.slice(0, 10))}</div>
         ${o.notes ? `<div class="note">Notes: ${esc(o.notes)}</div>` : ""}</div>
         <b class="big">${peso(ReportService.grandTotal(o))}</b></div>
       ${o.order_items.map((i) => `<div class="ln"><span>${i.quantity} x ${esc(i.blind_type)}, ${esc(i.fabric_name)}, ${esc(i.color)}, ${i.width_in} x ${i.height_in} in, ${esc(i.casing)}${i.acetate ? ", acetate cover" : ""}</span><b>${peso(i.unit_price * i.quantity)}</b></div>`).join("")}
@@ -74,7 +75,7 @@ export class AdminPage {
       <div class="opts">${STATUSES.map((s) => `<button type="button" class="opt ${o.status === s ? "on" : ""}" data-status="${s}" data-id="${o.id}">${s}</button>`).join("")}</div>
     </article>`;
   }
-
+ 
   #monthlyHtml() {
     const rows = ReportService.monthly(this.#orders);
     const top = Math.max(...rows.map((m) => m.inflow), 1);
@@ -84,7 +85,7 @@ export class AdminPage {
         <td><div class="bar"><i style="width:${(m.inflow / top) * 100}%"></i></div></td></tr>`).join("")}
     </table></section>`;
   }
-
+ 
   #bind() {
     const r = this.#root;
     r.querySelector("#out").addEventListener("click", async () => {
@@ -105,3 +106,4 @@ export class AdminPage {
     }));
   }
 }
+ 

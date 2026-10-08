@@ -115,3 +115,20 @@ th { color:var(--mut); font-weight:500; }
 .bar i { display: block; height: 100%; border-radius: 999px; background: var(--acc); }
 @media (max-width: 820px) { .kpis { grid-template-columns: 1fr 1fr; } .chargeform { grid-template-columns: 1fr; } }
 @media print { header, button, .toast { display: none !important; } .sticky { position: static; } body { background: #fff; } }
+
+.receipt { gap: 16px; padding: 28px; max-width: 760px; margin: 0 auto; overflow-x: auto; }
+.rhead { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; border-bottom: 1px solid var(--line); padding-bottom: 14px; }
+.rhead .note { margin-top: 4px; }
+.rmeta { text-align: right; }
+.rmeta b { font-size: 18px; }
+.rtable { width: 100%; border-collapse: collapse; min-width: 0; }
+.rtable th, .rtable td { padding: 8px 6px; border-bottom: 1px solid var(--line); font-size: 14px; vertical-align: top; text-align: left; }
+.rtable .num { text-align: right; white-space: nowrap; }
+.mini { display: inline-block; width: 12px; height: 12px; border-radius: 50%; border: 1px solid var(--line); margin-right: 6px; vertical-align: middle; }
+.rtotal { display: flex; justify-content: space-between; font-size: 20px; font-weight: 600; padding-top: 8px; }
+.receipt-actions { max-width: 760px; margin: 14px auto 0; }
+@media print {
+  .noprint { display: none !important; }
+  main { padding: 0; max-width: none; }
+  .receipt { border: 0; padding: 0; max-width: none; }
+}

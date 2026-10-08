@@ -5,17 +5,14 @@ import { CartItem } from "../models/CartItem.js";
 import { PricingService } from "../services/PricingService.js";
 import { BlindPreview } from "../components/BlindPreview.js";
 import { peso, esc } from "../utils/format.js";
-
+ 
 const TYPE_NOTES = {
   "Combi Blinds": "Day and night stripes", "Roller Blinds": "Clean and flat",
   "HoneyComb": "Insulating cells", "Smart Curtain": "Motorized, app control",
 };
-// Payment is handled outside the system; this only records the method for the admin.
-const PAYMENTS = ["GCash", "Bank transfer", "Cash"];
-
 // One shared cart, so it survives when the admin switches pages and returns.
 const cart = new Cart();
-
+ 
 export class StorefrontPage {
   #root;
   #auth;
@@ -23,12 +20,11 @@ export class StorefrontPage {
   #orders = new OrderRepository();
   #fabrics = [];
   #view = "shop";
-  #pay = PAYMENTS[0];
-  #doneNo = "";
+  #saved = null;
   #sel = { type: null, fabricId: null, color: null, width: 48, height: 60, casing: "Plastic", acetate: false, quantity: 1 };
-
+ 
   constructor(root, auth, role) { this.#root = root; this.#auth = auth; this.#role = role; }
-
+ 
   async render() {
     try { this.#fabrics = await new FabricRepository().list(); }
     catch (err) {
@@ -42,22 +38,22 @@ export class StorefrontPage {
     this.#pickType(this.#types[0]);
     this.#draw();
   }
-
+ 
   // ---------- selection state ----------
   get #types() { return [...new Set(this.#fabrics.map((f) => f.blind_type))]; }
   get #fabric() { return this.#fabrics.find((f) => f.id === this.#sel.fabricId); }
-
+ 
   #pickType(type) {
     this.#sel.type = type;
     this.#pickFabric(this.#fabrics.find((f) => f.blind_type === type).id);
   }
-
+ 
   #pickFabric(id) {
     const fabric = this.#fabrics.find((f) => f.id === id);
     this.#sel.fabricId = id;
     if (!fabric.colors.includes(this.#sel.color)) this.#sel.color = fabric.colors[0];
   }
-
+ 
   #currentItem() {
     const s = this.#sel;
     return new CartItem({
@@ -65,7 +61,7 @@ export class StorefrontPage {
       casing: s.casing, acetate: s.acetate, quantity: s.quantity,
     });
   }
-
+ 
   // ---------- layout ----------
   #draw() {
     const count = cart.items.reduce((s, i) => s + i.quantity, 0);
@@ -76,7 +72,7 @@ export class StorefrontPage {
     };
     const binders = {
       shop: () => this.#bindShop(), cart: () => this.#bindCart(),
-      checkout: () => this.#bindCheckout(), done: () => {},
+      checkout: () => this.#bindCheckout(), done: () => this.#bindDone(),
     };
     if (this.#view === "checkout" && cart.isEmpty) this.#view = "cart";
     this.#root.innerHTML = `<header><div class="brand"><span class="dot"></span>Leilo Blinds</div>
@@ -88,15 +84,15 @@ export class StorefrontPage {
     this.#root.querySelector("#out").addEventListener("click", () => this.#signOut());
     binders[this.#view]();
   }
-
+ 
   #go(view) { this.#view = view; this.#draw(); scrollTo(0, 0); }
-
+ 
   async #signOut() {
     await this.#auth.signOut();
     location.hash = "#/";
     location.reload();
   }
-
+ 
   #toast(message) {
     const t = document.createElement("div");
     t.className = "toast";
@@ -104,7 +100,7 @@ export class StorefrontPage {
     document.body.append(t);
     setTimeout(() => t.remove(), 2000);
   }
-
+ 
   // ---------- shop ----------
   #shopHtml() {
     const s = this.#sel;
@@ -132,7 +128,7 @@ export class StorefrontPage {
           <label class="check"><input name="acetate" type="checkbox" ${s.acetate ? "checked" : ""}> Add acetate cover (optional, ${peso(PricingService.ACETATE_FEE)})</label></section>
       </div><aside class="card sticky" id="quote"></aside></div>`;
   }
-
+ 
   #bindShop() {
     const shop = this.#root.querySelector("#shop");
     shop.addEventListener("click", (e) => {
@@ -153,7 +149,7 @@ export class StorefrontPage {
     });
     this.#updateQuote();
   }
-
+ 
   // Redraws only the side panel, so typing in the size boxes keeps its focus.
   #updateQuote() {
     const box = this.#root.querySelector("#quote");
@@ -172,8 +168,8 @@ export class StorefrontPage {
       <div class="tot"><span>Total</span><span>${peso(unit * item.quantity)}</span></div>
       ${ok ? "" : '<p class="err">Enter a width and height between 12 and 120 inches.</p>'}
       <div class="actions">
-        <button type="button" class="btn" id="add" ${ok ? "" : "disabled"}>Add to cart</button>
-        <button type="button" class="btn ghost" data-go="cart">View cart (${cart.items.length})</button>
+        <button type="button" class="btn" id="add" ${ok ? "" : "disabled"}>Add to Quote</button>
+        <button type="button" class="btn ghost" data-go="cart">View Quote (${cart.items.length})</button>
       </div>`;
     const step = (d) => { this.#sel.quantity = Math.max(1, this.#sel.quantity + d); this.#updateQuote(); };
     box.querySelector("#qm").addEventListener("click", () => step(-1));
@@ -186,7 +182,7 @@ export class StorefrontPage {
       this.#draw();
     });
   }
-
+ 
   // ---------- cart (order summary) ----------
   #cartHtml() {
     if (cart.isEmpty) {
@@ -210,11 +206,11 @@ export class StorefrontPage {
         <div class="note">Installation and transportation are added later by the admin.</div>
         <div class="tot"><span>Total</span><span>${peso(cart.subtotal)}</span></div>
         <div class="actions">
-          <button type="button" class="btn" data-go="checkout">Continue to order form</button>
+          <button type="button" class="btn" data-go="checkout">Continue to customer details</button>
           <button type="button" class="btn ghost" id="print">Print quote</button>
         </div></aside></div>`;
   }
-
+ 
   #bindCart() {
     this.#root.querySelectorAll("[data-q]").forEach((b) => b.addEventListener("click", () => {
       const item = cart.items[Number(b.dataset.q)];
@@ -228,54 +224,94 @@ export class StorefrontPage {
     const print = this.#root.querySelector("#print");
     if (print) print.addEventListener("click", () => window.print());
   }
-
-  // ---------- order form ----------
+ 
+  // ---------- customer details ----------
   #checkoutHtml() {
-    return `<h1>Order form</h1><p class="sub">Record the customer and how they plan to pay. The admin handles the rest.</p>
+    return `<h1>Customer details</h1><p class="sub">Enter the customer's details to save this quotation and order.</p>
       <form id="checkout" class="layout"><div class="stack">
         <section class="card"><h3>Customer</h3>
-          <div class="two"><label>Full name<input name="name" required></label><label>Contact number (optional)<input name="phone" type="tel"></label></div>
+          <div class="two"><label>Full name<input name="name" required></label><label>Contact number<input name="phone" type="tel" required></label></div>
+          <label>Address<textarea name="address" rows="2" required></textarea></label>
           <label>Notes (optional)<textarea name="notes" rows="2" placeholder="Room, preferred install date, and so on"></textarea></label></section>
-        <section class="card"><h3>Payment method</h3>
-          <div class="opts">${PAYMENTS.map((p) => `<button type="button" class="opt ${p === this.#pay ? "on" : ""}" data-pay="${p}">${p}</button>`).join("")}</div>
-          <p class="note">Payment is handled outside this system. This only records the method for the admin.</p></section>
       </div><aside class="card sticky"><h3>Order</h3>
         ${cart.items.map((i) => `<div class="ln"><span>${i.quantity} x ${esc(i.fabric.blind_type)}, ${i.width} x ${i.height} in</span><b>${peso(PricingService.lineTotal(i))}</b></div>`).join("")}
         <div class="tot"><span>Total</span><span>${peso(cart.subtotal)}</span></div>
         <p class="err" id="err"></p>
         <div class="actions"><button type="submit" class="btn">Save order</button></div></aside></form>`;
   }
-
+ 
   #bindCheckout() {
-    const form = this.#root.querySelector("#checkout");
-    form.querySelectorAll("[data-pay]").forEach((b) => b.addEventListener("click", () => {
-      this.#pay = b.dataset.pay;
-      form.querySelectorAll("[data-pay]").forEach((x) => x.classList.toggle("on", x === b));
-    }));
-    form.addEventListener("submit", (e) => this.#placeOrder(e));
+    this.#root.querySelector("#checkout").addEventListener("submit", (e) => this.#placeOrder(e));
   }
-
+ 
   async #placeOrder(e) {
     e.preventDefault();
     const form = e.target;
     const button = form.querySelector("[type=submit]");
-    const customer = { ...Object.fromEntries(new FormData(form)), payment: this.#pay };
+    const customer = Object.fromEntries(new FormData(form));
+    for (const k of Object.keys(customer)) customer[k] = String(customer[k]).trim();
+    if (!customer.name || !customer.phone || !customer.address) {
+      form.querySelector("#err").textContent = "Enter the customer's name, contact number, and address.";
+      return;
+    }
     button.disabled = true;
     try {
-      this.#doneNo = await this.#orders.place(customer, cart.toPayload());
+      const items = cart.items;
+      const total = cart.subtotal;
+      const no = await this.#orders.place(customer, cart.toPayload());
       cart.clear();
+      this.#saved = {
+        no, customer, items, total,
+        date: new Date().toLocaleDateString("en-PH", { year: "numeric", month: "long", day: "numeric" }),
+      };
       this.#view = "done";
       this.#toast("Order saved");
       this.#draw();
+      scrollTo(0, 0);
     } catch (err) {
       form.querySelector("#err").textContent = err.message;
       button.disabled = false;
     }
   }
-
+ 
+  // ---------- saved summary (screenshot or PDF) ----------
   #doneHtml() {
-    return `<div class="card empty"><h2>Order saved</h2>
-      <p>Order number <b>${esc(this.#doneNo)}</b>. The admin can now mark it Completed or Cancelled once the payment is settled.</p>
-      <button type="button" class="btn fit" data-go="shop">Start a new order</button></div>`;
+    const s = this.#saved;
+    const c = s.customer;
+    return `<article class="card receipt">
+        <div class="rhead">
+          <div><div class="brand"><span class="dot"></span>Leilo Blinds</div><p class="note">Quotation and order</p></div>
+          <div class="rmeta"><b>${esc(s.no)}</b><div class="note">${esc(s.date)}</div></div>
+        </div>
+        <section><h3>Customer</h3>
+          <div>${esc(c.name)}</div><div>${esc(c.phone)}</div><div>${esc(c.address)}</div>
+          ${c.notes ? `<div class="note">Notes: ${esc(c.notes)}</div>` : ""}</section>
+        <section><h3>Order</h3>
+          <table class="rtable"><tr><th>Item</th><th>Size</th><th class="num">Qty</th><th class="num">Unit price</th><th class="num">Amount</th></tr>
+            ${s.items.map((i) => `<tr>
+              <td><span class="mini" style="background:${BlindPreview.hex(i.color)}"></span><b>${esc(i.fabric.blind_type)}</b><div class="note">${esc(i.fabric.name)}, ${esc(i.color)}, ${esc(i.casing)} casing${i.acetate ? ", acetate cover" : ""}</div></td>
+              <td>${i.width} x ${i.height} in</td><td class="num">${i.quantity}</td>
+              <td class="num">${peso(PricingService.unitPrice(i))}</td><td class="num">${peso(PricingService.lineTotal(i))}</td></tr>`).join("")}
+          </table></section>
+        <div class="rtotal"><span>Total</span><span>${peso(s.total)}</span></div>
+        <p class="note">Installation and transportation fees are quoted separately.</p>
+      </article>
+      <div class="receipt-actions noprint">
+        <div class="actions">
+          <button type="button" class="btn" id="pdf">Download as PDF</button>
+          <button type="button" class="btn ghost" data-go="shop">Start a new order</button>
+        </div>
+        <p class="note">In the print window, choose Save as PDF as the destination. You can also take a screenshot of this page.</p>
+      </div>`;
+  }
+ 
+  #bindDone() {
+    this.#root.querySelector("#pdf").addEventListener("click", () => {
+      const original = document.title;
+      document.title = `Quotation ${this.#saved.no}`;
+      window.print();
+      document.title = original;
+    });
   }
 }
+ 
