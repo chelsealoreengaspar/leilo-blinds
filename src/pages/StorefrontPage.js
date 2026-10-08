@@ -3,146 +3,290 @@ import { OrderRepository } from "../repositories/OrderRepository.js";
 import { Cart } from "../services/Cart.js";
 import { CartItem } from "../models/CartItem.js";
 import { PricingService } from "../services/PricingService.js";
+import { BlindPreview } from "../components/BlindPreview.js";
 import { peso, esc } from "../utils/format.js";
+
+const TYPE_NOTES = {
+  "Combi Blinds": "Day and night stripes", "Roller Blinds": "Clean and flat",
+  "HoneyComb": "Insulating cells", "Smart Curtain": "Motorized, app control",
+};
+const PAYMENTS = ["GCash", "Credit or debit card", "Bank transfer", "Cash on delivery"];
+const STATUSES = ["Order placed", "Confirmed", "In production", "Quality check", "Out for delivery", "Delivered"];
+
+// One shared cart, so it survives when the customer opens the admin page and returns.
+const cart = new Cart();
 
 export class StorefrontPage {
   #root;
-  #fabrics = [];
-  #cart = new Cart();
   #orders = new OrderRepository();
+  #fabrics = [];
+  #view = "shop";
+  #pay = PAYMENTS[0];
+  #sel = { type: null, fabricId: null, color: null, width: 48, height: 60, casing: "Plastic", acetate: false, quantity: 1 };
+  #track = { no: "", result: undefined, error: "" };
 
   constructor(root) { this.#root = root; }
 
   async render() {
-    try {
-      this.#fabrics = await new FabricRepository().list();
-    } catch (err) {
+    try { this.#fabrics = await new FabricRepository().list(); }
+    catch (err) {
       this.#root.innerHTML = `<main><h1>Could not load fabrics</h1><p>${esc(err.message)}</p></main>`;
       return;
     }
-    const types = [...new Set(this.#fabrics.map((f) => f.blind_type))];
-    this.#root.innerHTML = `
-      <header><b>Leilo Blinds</b><a href="#/admin">Admin</a></header>
-      <main>
-        <h1>Design your blinds</h1>
-        <form id="shop" class="card">
-          <label>Type <select name="type">${types.map((t) => `<option>${esc(t)}</option>`).join("")}</select></label>
-          <label>Fabric <select name="fabric"></select></label>
-          <label>Color <select name="color"></select></label>
-          <label>Width (in) <input name="width" type="number" min="12" max="120" value="48"></label>
-          <label>Height (in) <input name="height" type="number" min="12" max="120" value="60"></label>
-          <label>Casing <select name="casing"><option>Plastic</option><option>Metal</option></select></label>
-          <label class="check"><input name="acetate" type="checkbox"> Acetate cover (optional)</label>
-          <label>Quantity <input name="quantity" type="number" min="1" value="1"></label>
-          <p>Price: <b id="price"></b></p>
-          <button>Add to cart</button>
-        </form>
-        <section id="cart" class="card"></section>
-        <section class="card">
-          <h2>Track your order</h2>
-          <input id="trackNo" placeholder="Order number">
-          <button id="trackBtn">Track order</button>
-          <p id="trackOut"></p>
-        </section>
-      </main>`;
-    this.#bind();
-    this.#syncFabrics();
-    this.#renderCart();
+    if (!this.#fabrics.length) {
+      this.#root.innerHTML = "<main><h1>No fabrics yet</h1><p>Add rows to the fabrics table in Supabase.</p></main>";
+      return;
+    }
+    this.#pickType(this.#types[0]);
+    this.#draw();
   }
 
-  get #form() { return this.#root.querySelector("#shop"); }
+  // ---------- selection state ----------
+  get #types() { return [...new Set(this.#fabrics.map((f) => f.blind_type))]; }
+  get #fabric() { return this.#fabrics.find((f) => f.id === this.#sel.fabricId); }
 
-  #syncFabrics() {
-    const f = this.#form;
-    const list = this.#fabrics.filter((x) => x.blind_type === f.type.value);
-    f.fabric.innerHTML = list.map((x) =>
-      `<option value="${x.id}">${esc(x.name)} (${peso(x.price_per_sqft)}/sq ft)</option>`).join("");
-    this.#syncColors();
+  #pickType(type) {
+    this.#sel.type = type;
+    this.#pickFabric(this.#fabrics.find((f) => f.blind_type === type).id);
   }
 
-  #syncColors() {
-    const f = this.#form;
-    const fabric = this.#fabrics.find((x) => x.id === Number(f.fabric.value));
-    f.color.innerHTML = fabric.colors.map((c) => `<option>${esc(c)}</option>`).join("");
-    this.#updatePrice();
+  #pickFabric(id) {
+    const fabric = this.#fabrics.find((f) => f.id === id);
+    this.#sel.fabricId = id;
+    if (!fabric.colors.includes(this.#sel.color)) this.#sel.color = fabric.colors[0];
   }
 
   #currentItem() {
-    const f = this.#form;
+    const s = this.#sel;
     return new CartItem({
-      fabric: this.#fabrics.find((x) => x.id === Number(f.fabric.value)),
-      color: f.color.value, width: f.width.value, height: f.height.value,
-      casing: f.casing.value, acetate: f.acetate.checked, quantity: f.quantity.value,
+      fabric: this.#fabric, color: s.color, width: s.width, height: s.height,
+      casing: s.casing, acetate: s.acetate, quantity: s.quantity,
     });
   }
 
-  #updatePrice() {
+  // ---------- layout ----------
+  #draw() {
+    const count = cart.items.reduce((s, i) => s + i.quantity, 0);
+    const tabs = [["shop", "Shop"], ["cart", count ? `Cart (${count})` : "Cart"], ["track", "Track order"]];
+    const views = {
+      shop: () => this.#shopHtml(), cart: () => this.#cartHtml(),
+      checkout: () => this.#checkoutHtml(), track: () => this.#trackHtml(),
+    };
+    const binders = {
+      shop: () => this.#bindShop(), cart: () => this.#bindCart(),
+      checkout: () => this.#bindCheckout(), track: () => this.#bindTrack(),
+    };
+    if (this.#view === "checkout" && cart.isEmpty) this.#view = "cart";
+    this.#root.innerHTML = `<header><div class="brand"><span class="dot"></span>Leilo Blinds</div>
+      <nav>${tabs.map(([v, l]) => `<button type="button" class="tab ${this.#view === v || (v === "cart" && this.#view === "checkout") ? "on" : ""}" data-go="${v}">${l}</button>`).join("")}<a class="tab" href="#/admin">Admin</a></nav></header>
+      <main>${views[this.#view]()}</main>`;
+    this.#root.querySelectorAll("[data-go]").forEach((b) => b.addEventListener("click", () => this.#go(b.dataset.go)));
+    binders[this.#view]();
+  }
+
+  #go(view) { this.#view = view; this.#draw(); scrollTo(0, 0); }
+
+  #toast(message) {
+    const t = document.createElement("div");
+    t.className = "toast";
+    t.textContent = message;
+    document.body.append(t);
+    setTimeout(() => t.remove(), 2000);
+  }
+
+  // ---------- shop ----------
+  #shopHtml() {
+    const s = this.#sel;
+    const opt = (on, attr, label, sub) =>
+      `<button type="button" class="opt ${on ? "on" : ""}" ${attr}>${esc(label)}${sub ? `<small>${esc(sub)}</small>` : ""}</button>`;
+    return `<h1>Design your blinds</h1>
+      <p class="sub">Choose a style, set your window size in inches, and watch the price and preview update.</p>
+      <div class="layout"><div class="stack" id="shop">
+        <section class="card"><h3>Type of blinds</h3><div class="opts">
+          ${this.#types.map((t) => opt(t === s.type, `data-type="${esc(t)}"`, t, TYPE_NOTES[t])).join("")}</div></section>
+        <section class="card"><h3>Fabric</h3><div class="opts">
+          ${this.#fabrics.filter((f) => f.blind_type === s.type).map((f) =>
+            opt(f.id === s.fabricId, `data-fabric="${f.id}"`, f.name, `${peso(f.price_per_sqft)} per sq ft`)).join("")}</div></section>
+        <section class="card"><h3>Color</h3><div class="opts swatches">
+          ${this.#fabric.colors.map((c) => `<div class="swl"><button type="button" class="sw ${c === s.color ? "on" : ""}"
+            style="background:${BlindPreview.hex(c)}" aria-label="${esc(c)}" data-color="${esc(c)}"></button>${esc(c)}</div>`).join("")}</div></section>
+        <section class="card"><h3>Size in inches</h3>
+          <div class="two">
+            <label>Width (in)<input name="width" type="number" min="12" max="120" value="${s.width}"></label>
+            <label>Height (in)<input name="height" type="number" min="12" max="120" value="${s.height}"></label>
+          </div>
+          <p class="note">Each side can be 12 to 120 inches. Orders under ${PricingService.MIN_AREA_SQFT} sq ft are billed at ${PricingService.MIN_AREA_SQFT} sq ft.</p></section>
+        <section class="card"><h3>Casing</h3><div class="opts">
+          ${["Plastic", "Metal"].map((c) => opt(c === s.casing, `data-casing="${c}"`, c, `${peso(PricingService.CASING_PER_FT[c])} per ft of width`)).join("")}</div>
+          <label class="check"><input name="acetate" type="checkbox" ${s.acetate ? "checked" : ""}> Add acetate cover (optional, ${peso(PricingService.ACETATE_FEE)})</label></section>
+      </div><aside class="card sticky" id="quote"></aside></div>`;
+  }
+
+  #bindShop() {
+    const shop = this.#root.querySelector("#shop");
+    shop.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-type],[data-fabric],[data-color],[data-casing]");
+      if (!b) return;
+      const d = b.dataset;
+      if (d.type) this.#pickType(d.type);
+      else if (d.fabric) this.#pickFabric(Number(d.fabric));
+      else if (d.color) this.#sel.color = d.color;
+      else if (d.casing) this.#sel.casing = d.casing;
+      this.#draw();
+    });
+    shop.addEventListener("input", (e) => {
+      const t = e.target;
+      if (t.name === "width" || t.name === "height") this.#sel[t.name] = Number(t.value);
+      else if (t.name === "acetate") this.#sel.acetate = t.checked;
+      this.#updateQuote();
+    });
+    this.#updateQuote();
+  }
+
+  // Redraws only the side panel, so typing in the size boxes keeps its focus.
+  #updateQuote() {
+    const box = this.#root.querySelector("#quote");
     const item = this.#currentItem();
-    this.#root.querySelector("#price").textContent =
-      item.isValid ? peso(PricingService.lineTotal(item)) : "Sizes must be 12 to 120 inches";
-  }
-
-  #bind() {
-    const f = this.#form;
-    f.addEventListener("input", (e) => {
-      if (e.target.name === "type") this.#syncFabrics();
-      else if (e.target.name === "fabric") this.#syncColors();
-      else this.#updatePrice();
+    const ok = item.isValid;
+    const unit = ok ? PricingService.unitPrice(item) : 0;
+    const area = ok ? PricingService.area(item) : 0;
+    box.innerHTML = `${BlindPreview.render(item)}<h3>Your blind</h3>
+      <div class="ln">Style<b>${esc(item.fabric.blind_type)}</b></div>
+      <div class="ln">Fabric and color<b>${esc(item.fabric.name)}, ${esc(item.color)}</b></div>
+      <div class="ln">Size<b>${item.width || 0} x ${item.height || 0} in</b></div>
+      <div class="ln">Casing<b>${esc(item.casing)}</b></div>
+      <div class="ln">Acetate cover<b>${item.acetate ? "Yes" : "No"}</b></div>
+      <div class="ln">Billable area<b>${area.toFixed(1)} sq ft</b></div>
+      <div class="ln">Quantity<b class="qty"><button type="button" class="round" id="qm" aria-label="Less">-</button>${item.quantity}<button type="button" class="round" id="qp" aria-label="More">+</button></b></div>
+      <div class="tot"><span>Total</span><span>${peso(unit * item.quantity)}</span></div>
+      ${ok ? "" : '<p class="err">Enter a width and height between 12 and 120 inches.</p>'}
+      <div class="actions">
+        <button type="button" class="btn" id="add" ${ok ? "" : "disabled"}>Add to cart</button>
+        <button type="button" class="btn ghost" data-go="cart">View cart (${cart.items.length})</button>
+      </div>`;
+    const step = (d) => { this.#sel.quantity = Math.max(1, this.#sel.quantity + d); this.#updateQuote(); };
+    box.querySelector("#qm").addEventListener("click", () => step(-1));
+    box.querySelector("#qp").addEventListener("click", () => step(1));
+    box.querySelector("[data-go]").addEventListener("click", () => this.#go("cart"));
+    box.querySelector("#add").addEventListener("click", () => {
+      cart.add(this.#currentItem());
+      this.#sel.quantity = 1;
+      this.#toast("Added to cart");
+      this.#draw();
     });
-    f.addEventListener("submit", (e) => {
-      e.preventDefault();
-      const item = this.#currentItem();
-      if (!item.isValid) return;
-      this.#cart.add(item);
-      this.#renderCart();
-    });
-    this.#root.querySelector("#trackBtn").addEventListener("click", () => this.#track());
   }
 
-  #renderCart() {
-    const box = this.#root.querySelector("#cart");
-    if (this.#cart.isEmpty) { box.innerHTML = "<h2>Cart</h2><p>Your cart is empty.</p>"; return; }
-    box.innerHTML = `<h2>Order summary</h2>
-      ${this.#cart.items.map((i, n) => `
-        <p>${i.quantity} x ${esc(i.label)}: <b>${peso(PricingService.lineTotal(i))}</b>
-        <button type="button" class="link" data-rm="${n}">Remove</button></p>`).join("")}
-      <h3>Total: ${peso(this.#cart.subtotal)}</h3>
-      <h2>Checkout and payment</h2>
-      <form id="checkout">
-        <input name="name" placeholder="Full name" required>
-        <input name="phone" placeholder="Mobile number" required>
-        <input name="email" type="email" placeholder="Email">
-        <textarea name="address" placeholder="Delivery address" required></textarea>
-        <select name="payment">
-          <option>GCash</option><option>Credit or debit card</option>
-          <option>Bank transfer</option><option>Cash on delivery</option>
-        </select>
-        <p class="note">Payment is not processed yet. This records your order.</p>
-        <button>Place order</button>
-      </form><p id="msg"></p>`;
-    box.querySelectorAll("[data-rm]").forEach((b) =>
-      b.addEventListener("click", () => { this.#cart.remove(Number(b.dataset.rm)); this.#renderCart(); }));
-    box.querySelector("#checkout").addEventListener("submit", (e) => this.#checkout(e));
+  // ---------- cart (order summary) ----------
+  #cartHtml() {
+    if (cart.isEmpty) {
+      return `<div class="card empty"><h2>Your cart is empty</h2><p>Add a blind to start your order.</p>
+        <button type="button" class="btn fit" data-go="shop">Design a blind</button></div>`;
+    }
+    const count = cart.items.reduce((s, i) => s + i.quantity, 0);
+    return `<h1>Order summary</h1><p class="sub">Review your blinds before checkout. You can add as many as you need.</p>
+      <div class="layout"><section class="card">
+        ${cart.items.map((i, n) => `<div class="item">
+          <div class="chip" style="background:${BlindPreview.hex(i.color)}"></div>
+          <div class="grow"><b>${esc(i.fabric.blind_type)}</b>
+            <div class="note">${esc(i.fabric.name)}, ${esc(i.color)}, ${i.width} x ${i.height} in, ${esc(i.casing)} casing${i.acetate ? ", acetate cover" : ""}</div>
+            <div class="qty"><button type="button" class="round" data-q="${n}" data-d="-1" aria-label="Less">-</button>${i.quantity}
+              <button type="button" class="round" data-q="${n}" data-d="1" aria-label="More">+</button>
+              <button type="button" class="link" data-rm="${n}">Remove</button></div></div>
+          <b>${peso(PricingService.lineTotal(i))}</b></div>`).join("")}
+        <button type="button" class="link" data-go="shop">Add another blind</button></section>
+      <aside class="card sticky"><h3>Totals</h3>
+        <div class="ln">Blinds (${count})<b>${peso(cart.subtotal)}</b></div>
+        <div class="ln">Delivery and installation<b>Free</b></div>
+        <div class="tot"><span>Total</span><span>${peso(cart.subtotal)}</span></div>
+        <div class="actions"><button type="button" class="btn" data-go="checkout">Proceed to checkout</button></div></aside></div>`;
   }
 
-  async #checkout(e) {
+  #bindCart() {
+    this.#root.querySelectorAll("[data-q]").forEach((b) => b.addEventListener("click", () => {
+      const item = cart.items[Number(b.dataset.q)];
+      item.quantity = Math.max(1, item.quantity + Number(b.dataset.d));
+      this.#draw();
+    }));
+    this.#root.querySelectorAll("[data-rm]").forEach((b) => b.addEventListener("click", () => {
+      cart.remove(Number(b.dataset.rm));
+      this.#draw();
+    }));
+  }
+
+  // ---------- checkout and payment ----------
+  #checkoutHtml() {
+    return `<h1>Checkout and payment</h1><p class="sub">Tell us where to deliver and how you would like to pay.</p>
+      <form id="checkout" class="layout"><div class="stack">
+        <section class="card"><h3>Delivery details</h3>
+          <div class="two"><label>Full name<input name="name" required></label><label>Mobile number<input name="phone" type="tel" required></label></div>
+          <label>Email<input name="email" type="email"></label>
+          <label>Address<textarea name="address" rows="2" required></textarea></label></section>
+        <section class="card"><h3>Payment method</h3>
+          <div class="opts">${PAYMENTS.map((p) => `<button type="button" class="opt ${p === this.#pay ? "on" : ""}" data-pay="${p}">${p}</button>`).join("")}</div>
+          <p class="note">Payment is not processed yet. This records your order.</p></section>
+      </div><aside class="card sticky"><h3>Your order</h3>
+        ${cart.items.map((i) => `<div class="ln"><span>${i.quantity} x ${esc(i.fabric.blind_type)}, ${i.width} x ${i.height} in</span><b>${peso(PricingService.lineTotal(i))}</b></div>`).join("")}
+        <div class="tot"><span>Total</span><span>${peso(cart.subtotal)}</span></div>
+        <p class="err" id="err"></p>
+        <div class="actions"><button type="submit" class="btn">Place order</button></div></aside></form>`;
+  }
+
+  #bindCheckout() {
+    const form = this.#root.querySelector("#checkout");
+    form.querySelectorAll("[data-pay]").forEach((b) => b.addEventListener("click", () => {
+      this.#pay = b.dataset.pay;
+      form.querySelectorAll("[data-pay]").forEach((x) => x.classList.toggle("on", x === b));
+    }));
+    form.addEventListener("submit", (e) => this.#placeOrder(e));
+  }
+
+  async #placeOrder(e) {
     e.preventDefault();
-    const data = Object.fromEntries(new FormData(e.target));
-    const msg = this.#root.querySelector("#msg");
+    const form = e.target;
+    const button = form.querySelector("[type=submit]");
+    const customer = { ...Object.fromEntries(new FormData(form)), payment: this.#pay };
+    button.disabled = true;
     try {
-      const orderNo = await this.#orders.place(data, this.#cart.toPayload());
-      this.#cart.clear();
-      this.#root.querySelector("#cart").innerHTML =
-        `<h2>Order placed</h2><p>Your order number is <b>${esc(orderNo)}</b>. Use it to track your order below.</p>`;
-      this.#root.querySelector("#trackNo").value = orderNo;
-    } catch (err) { msg.textContent = err.message; }
+      const orderNo = await this.#orders.place(customer, cart.toPayload());
+      cart.clear();
+      this.#track = { no: orderNo, result: undefined, error: "" };
+      this.#view = "track";
+      this.#toast("Order placed");
+      await this.#lookup();
+    } catch (err) {
+      form.querySelector("#err").textContent = err.message;
+      button.disabled = false;
+    }
   }
 
-  async #track() {
-    const out = this.#root.querySelector("#trackOut");
-    try {
-      const o = await this.#orders.track(this.#root.querySelector("#trackNo").value);
-      out.textContent = o ? `Status: ${o.status}. Total: ${peso(o.total)}` : "No order found with that number.";
-    } catch (err) { out.textContent = err.message; }
+  // ---------- order status ----------
+  #trackHtml() {
+    const t = this.#track;
+    const r = t.result;
+    const index = r ? STATUSES.indexOf(r.status) : -1;
+    return `<h1>Track your order</h1><p class="sub">Enter your order number to see where your blinds are.</p>
+      <section class="card"><div class="trackbar">
+        <label class="grow">Order number<input id="trackNo" value="${esc(t.no)}" placeholder="BL-261008-1234"></label>
+        <button type="button" class="btn fit" id="trackBtn">Track order</button></div></section>
+      ${t.error ? `<p class="err">${esc(t.error)}</p>` : ""}
+      ${r === null ? '<p class="err">No order found with that number. Check it and try again.</p>' : ""}
+      ${r ? `<section class="card"><h3>${esc(r.order_no)}</h3>
+        <div class="tl">${STATUSES.map((s, n) => `<div class="${n <= index ? "done" : ""} ${n === index ? "now" : ""}">${s}</div>`).join("")}</div>
+        <div class="ln">Total<b>${peso(r.total)}</b></div></section>` : ""}`;
+  }
+
+  #bindTrack() {
+    const input = this.#root.querySelector("#trackNo");
+    input.addEventListener("input", () => { this.#track.no = input.value; });
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") this.#lookup(); });
+    this.#root.querySelector("#trackBtn").addEventListener("click", () => this.#lookup());
+  }
+
+  async #lookup() {
+    const no = this.#track.no.trim();
+    if (!no) { this.#draw(); return; }
+    try { this.#track.result = await this.#orders.track(no); this.#track.error = ""; }
+    catch (err) { this.#track.result = undefined; this.#track.error = err.message; }
+    this.#draw();
   }
 }

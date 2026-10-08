@@ -1,6 +1,6 @@
 -- STEP 1: change the email below to the admin email you will create in Supabase.
 create or replace function is_admin() returns boolean
-language sql stable as $$ select (auth.jwt() ->> 'email') = 'you@email.com' $$;
+language sql stable as $$ select (auth.jwt() ->> 'email') = 'chelsealoreengaspar@gmail.com' $$;
 
 create table if not exists fabrics (
   id bigint generated always as identity primary key,
