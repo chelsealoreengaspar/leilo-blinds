@@ -9,15 +9,10 @@ export class OrderRepository {
     return data;
   }
 
-  async track(orderNo) {
-    const { data, error } = await this.#db.rpc("track_order", { p_no: orderNo.trim() });
-    if (error) throw error;
-    return data[0] ?? null;
-  }
-
+  // Admin only: orders with their items and extra charges.
   async listAll() {
     const { data, error } = await this.#db
-      .from("orders").select("*, order_items(*)")
+      .from("orders").select("*, order_items(*), order_charges(*)")
       .order("created_at", { ascending: false });
     if (error) throw error;
     return data;
@@ -25,6 +20,16 @@ export class OrderRepository {
 
   async updateStatus(id, status) {
     const { error } = await this.#db.from("orders").update({ status }).eq("id", id);
+    if (error) throw error;
+  }
+
+  async addCharge(orderId, label, amount) {
+    const { error } = await this.#db.from("order_charges").insert({ order_id: orderId, label, amount });
+    if (error) throw error;
+  }
+
+  async removeCharge(id) {
+    const { error } = await this.#db.from("order_charges").delete().eq("id", id);
     if (error) throw error;
   }
 }

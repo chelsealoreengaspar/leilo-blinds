@@ -10,22 +10,24 @@ const TYPE_NOTES = {
   "Combi Blinds": "Day and night stripes", "Roller Blinds": "Clean and flat",
   "HoneyComb": "Insulating cells", "Smart Curtain": "Motorized, app control",
 };
-const PAYMENTS = ["GCash", "Credit or debit card", "Bank transfer", "Cash on delivery"];
-const STATUSES = ["Order placed", "Confirmed", "In production", "Quality check", "Out for delivery", "Delivered"];
+// Payment is handled outside the system; this only records the method for the admin.
+const PAYMENTS = ["GCash", "Bank transfer", "Cash"];
 
-// One shared cart, so it survives when the customer opens the admin page and returns.
+// One shared cart, so it survives when the admin switches pages and returns.
 const cart = new Cart();
 
 export class StorefrontPage {
   #root;
+  #auth;
+  #role;
   #orders = new OrderRepository();
   #fabrics = [];
   #view = "shop";
   #pay = PAYMENTS[0];
+  #doneNo = "";
   #sel = { type: null, fabricId: null, color: null, width: 48, height: 60, casing: "Plastic", acetate: false, quantity: 1 };
-  #track = { no: "", result: undefined, error: "" };
 
-  constructor(root) { this.#root = root; }
+  constructor(root, auth, role) { this.#root = root; this.#auth = auth; this.#role = role; }
 
   async render() {
     try { this.#fabrics = await new FabricRepository().list(); }
@@ -67,24 +69,33 @@ export class StorefrontPage {
   // ---------- layout ----------
   #draw() {
     const count = cart.items.reduce((s, i) => s + i.quantity, 0);
-    const tabs = [["shop", "Shop"], ["cart", count ? `Cart (${count})` : "Cart"], ["track", "Track order"]];
+    const tabs = [["shop", "Shop"], ["cart", count ? `Cart (${count})` : "Cart"]];
     const views = {
       shop: () => this.#shopHtml(), cart: () => this.#cartHtml(),
-      checkout: () => this.#checkoutHtml(), track: () => this.#trackHtml(),
+      checkout: () => this.#checkoutHtml(), done: () => this.#doneHtml(),
     };
     const binders = {
       shop: () => this.#bindShop(), cart: () => this.#bindCart(),
-      checkout: () => this.#bindCheckout(), track: () => this.#bindTrack(),
+      checkout: () => this.#bindCheckout(), done: () => {},
     };
     if (this.#view === "checkout" && cart.isEmpty) this.#view = "cart";
     this.#root.innerHTML = `<header><div class="brand"><span class="dot"></span>Leilo Blinds</div>
-      <nav>${tabs.map(([v, l]) => `<button type="button" class="tab ${this.#view === v || (v === "cart" && this.#view === "checkout") ? "on" : ""}" data-go="${v}">${l}</button>`).join("")}<a class="tab" href="#/admin">Admin</a></nav></header>
+      <nav>${tabs.map(([v, l]) => `<button type="button" class="tab ${this.#view === v || (v === "cart" && this.#view === "checkout") ? "on" : ""}" data-go="${v}">${l}</button>`).join("")}
+      ${this.#role === "admin" ? '<a class="tab" href="#/admin">Admin</a>' : ""}
+      <button type="button" class="tab" id="out">Sign out</button></nav></header>
       <main>${views[this.#view]()}</main>`;
     this.#root.querySelectorAll("[data-go]").forEach((b) => b.addEventListener("click", () => this.#go(b.dataset.go)));
+    this.#root.querySelector("#out").addEventListener("click", () => this.#signOut());
     binders[this.#view]();
   }
 
   #go(view) { this.#view = view; this.#draw(); scrollTo(0, 0); }
+
+  async #signOut() {
+    await this.#auth.signOut();
+    location.hash = "#/";
+    location.reload();
+  }
 
   #toast(message) {
     const t = document.createElement("div");
@@ -99,8 +110,8 @@ export class StorefrontPage {
     const s = this.#sel;
     const opt = (on, attr, label, sub) =>
       `<button type="button" class="opt ${on ? "on" : ""}" ${attr}>${esc(label)}${sub ? `<small>${esc(sub)}</small>` : ""}</button>`;
-    return `<h1>Design your blinds</h1>
-      <p class="sub">Choose a style, set your window size in inches, and watch the price and preview update.</p>
+    return `<h1>New order</h1>
+      <p class="sub">Choose a style, set the window size in inches, and show the customer the preview and price.</p>
       <div class="layout"><div class="stack" id="shop">
         <section class="card"><h3>Type of blinds</h3><div class="opts">
           ${this.#types.map((t) => opt(t === s.type, `data-type="${esc(t)}"`, t, TYPE_NOTES[t])).join("")}</div></section>
@@ -179,11 +190,11 @@ export class StorefrontPage {
   // ---------- cart (order summary) ----------
   #cartHtml() {
     if (cart.isEmpty) {
-      return `<div class="card empty"><h2>Your cart is empty</h2><p>Add a blind to start your order.</p>
+      return `<div class="card empty"><h2>The cart is empty</h2><p>Add a blind to start an order.</p>
         <button type="button" class="btn fit" data-go="shop">Design a blind</button></div>`;
     }
     const count = cart.items.reduce((s, i) => s + i.quantity, 0);
-    return `<h1>Order summary</h1><p class="sub">Review your blinds before checkout. You can add as many as you need.</p>
+    return `<h1>Order summary</h1><p class="sub">Review the blinds with the customer. You can add as many as needed.</p>
       <div class="layout"><section class="card">
         ${cart.items.map((i, n) => `<div class="item">
           <div class="chip" style="background:${BlindPreview.hex(i.color)}"></div>
@@ -196,9 +207,12 @@ export class StorefrontPage {
         <button type="button" class="link" data-go="shop">Add another blind</button></section>
       <aside class="card sticky"><h3>Totals</h3>
         <div class="ln">Blinds (${count})<b>${peso(cart.subtotal)}</b></div>
-        <div class="ln">Delivery and installation<b>Free</b></div>
+        <div class="note">Installation and transportation are added later by the admin.</div>
         <div class="tot"><span>Total</span><span>${peso(cart.subtotal)}</span></div>
-        <div class="actions"><button type="button" class="btn" data-go="checkout">Proceed to checkout</button></div></aside></div>`;
+        <div class="actions">
+          <button type="button" class="btn" data-go="checkout">Continue to order form</button>
+          <button type="button" class="btn ghost" id="print">Print quote</button>
+        </div></aside></div>`;
   }
 
   #bindCart() {
@@ -211,24 +225,25 @@ export class StorefrontPage {
       cart.remove(Number(b.dataset.rm));
       this.#draw();
     }));
+    const print = this.#root.querySelector("#print");
+    if (print) print.addEventListener("click", () => window.print());
   }
 
-  // ---------- checkout and payment ----------
+  // ---------- order form ----------
   #checkoutHtml() {
-    return `<h1>Checkout and payment</h1><p class="sub">Tell us where to deliver and how you would like to pay.</p>
+    return `<h1>Order form</h1><p class="sub">Record the customer and how they plan to pay. The admin handles the rest.</p>
       <form id="checkout" class="layout"><div class="stack">
-        <section class="card"><h3>Delivery details</h3>
-          <div class="two"><label>Full name<input name="name" required></label><label>Mobile number<input name="phone" type="tel" required></label></div>
-          <label>Email<input name="email" type="email"></label>
-          <label>Address<textarea name="address" rows="2" required></textarea></label></section>
+        <section class="card"><h3>Customer</h3>
+          <div class="two"><label>Full name<input name="name" required></label><label>Contact number (optional)<input name="phone" type="tel"></label></div>
+          <label>Notes (optional)<textarea name="notes" rows="2" placeholder="Room, preferred install date, and so on"></textarea></label></section>
         <section class="card"><h3>Payment method</h3>
           <div class="opts">${PAYMENTS.map((p) => `<button type="button" class="opt ${p === this.#pay ? "on" : ""}" data-pay="${p}">${p}</button>`).join("")}</div>
-          <p class="note">Payment is not processed yet. This records your order.</p></section>
-      </div><aside class="card sticky"><h3>Your order</h3>
+          <p class="note">Payment is handled outside this system. This only records the method for the admin.</p></section>
+      </div><aside class="card sticky"><h3>Order</h3>
         ${cart.items.map((i) => `<div class="ln"><span>${i.quantity} x ${esc(i.fabric.blind_type)}, ${i.width} x ${i.height} in</span><b>${peso(PricingService.lineTotal(i))}</b></div>`).join("")}
         <div class="tot"><span>Total</span><span>${peso(cart.subtotal)}</span></div>
         <p class="err" id="err"></p>
-        <div class="actions"><button type="submit" class="btn">Place order</button></div></aside></form>`;
+        <div class="actions"><button type="submit" class="btn">Save order</button></div></aside></form>`;
   }
 
   #bindCheckout() {
@@ -247,46 +262,20 @@ export class StorefrontPage {
     const customer = { ...Object.fromEntries(new FormData(form)), payment: this.#pay };
     button.disabled = true;
     try {
-      const orderNo = await this.#orders.place(customer, cart.toPayload());
+      this.#doneNo = await this.#orders.place(customer, cart.toPayload());
       cart.clear();
-      this.#track = { no: orderNo, result: undefined, error: "" };
-      this.#view = "track";
-      this.#toast("Order placed");
-      await this.#lookup();
+      this.#view = "done";
+      this.#toast("Order saved");
+      this.#draw();
     } catch (err) {
       form.querySelector("#err").textContent = err.message;
       button.disabled = false;
     }
   }
 
-  // ---------- order status ----------
-  #trackHtml() {
-    const t = this.#track;
-    const r = t.result;
-    const index = r ? STATUSES.indexOf(r.status) : -1;
-    return `<h1>Track your order</h1><p class="sub">Enter your order number to see where your blinds are.</p>
-      <section class="card"><div class="trackbar">
-        <label class="grow">Order number<input id="trackNo" value="${esc(t.no)}" placeholder="BL-261008-1234"></label>
-        <button type="button" class="btn fit" id="trackBtn">Track order</button></div></section>
-      ${t.error ? `<p class="err">${esc(t.error)}</p>` : ""}
-      ${r === null ? '<p class="err">No order found with that number. Check it and try again.</p>' : ""}
-      ${r ? `<section class="card"><h3>${esc(r.order_no)}</h3>
-        <div class="tl">${STATUSES.map((s, n) => `<div class="${n <= index ? "done" : ""} ${n === index ? "now" : ""}">${s}</div>`).join("")}</div>
-        <div class="ln">Total<b>${peso(r.total)}</b></div></section>` : ""}`;
-  }
-
-  #bindTrack() {
-    const input = this.#root.querySelector("#trackNo");
-    input.addEventListener("input", () => { this.#track.no = input.value; });
-    input.addEventListener("keydown", (e) => { if (e.key === "Enter") this.#lookup(); });
-    this.#root.querySelector("#trackBtn").addEventListener("click", () => this.#lookup());
-  }
-
-  async #lookup() {
-    const no = this.#track.no.trim();
-    if (!no) { this.#draw(); return; }
-    try { this.#track.result = await this.#orders.track(no); this.#track.error = ""; }
-    catch (err) { this.#track.result = undefined; this.#track.error = err.message; }
-    this.#draw();
+  #doneHtml() {
+    return `<div class="card empty"><h2>Order saved</h2>
+      <p>Order number <b>${esc(this.#doneNo)}</b>. The admin can now mark it Completed or Cancelled once the payment is settled.</p>
+      <button type="button" class="btn fit" data-go="shop">Start a new order</button></div>`;
   }
 }
