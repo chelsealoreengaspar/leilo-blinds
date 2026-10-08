@@ -3,28 +3,26 @@ import { OrderRepository } from "../repositories/OrderRepository.js";
 import { Cart } from "../services/Cart.js";
 import { CartItem } from "../models/CartItem.js";
 import { PricingService } from "../services/PricingService.js";
+import { StyleRepository } from "../repositories/StyleRepository.js";
 import { BlindPreview } from "../components/BlindPreview.js";
 import { peso, esc } from "../utils/format.js";
- 
-const TYPE_NOTES = {
-  "Combi Blinds": "Day and night stripes", "Roller Blinds": "Clean and flat",
-  "HoneyComb": "Insulating cells", "Smart Curtain": "Motorized, app control",
-};
+
 // One shared cart, so it survives when the admin switches pages and returns.
 const cart = new Cart();
- 
+
 export class StorefrontPage {
   #root;
   #auth;
   #role;
   #orders = new OrderRepository();
   #fabrics = [];
+  #styles = [];
   #view = "shop";
   #saved = null;
   #sel = { type: null, fabricId: null, color: null, width: 48, height: 60, casing: "Plastic", acetate: false, quantity: 1 };
- 
+
   constructor(root, auth, role) { this.#root = root; this.#auth = auth; this.#role = role; }
- 
+
   async render() {
     try { this.#fabrics = await new FabricRepository().list(); }
     catch (err) {
@@ -35,25 +33,38 @@ export class StorefrontPage {
       this.#root.innerHTML = "<main><h1>No fabrics yet</h1><p>Add rows to the fabrics table in Supabase.</p></main>";
       return;
     }
+    try { this.#styles = await new StyleRepository().list(); }
+    catch { this.#styles = []; }
+    if (!this.#types.length) {
+      this.#root.innerHTML = "<main><h1>No blind styles available</h1><p>Check the blind_styles and fabrics tables in Supabase.</p></main>";
+      return;
+    }
     this.#pickType(this.#types[0]);
     this.#draw();
   }
- 
+
   // ---------- selection state ----------
-  get #types() { return [...new Set(this.#fabrics.map((f) => f.blind_type))]; }
+  // A style shows only when it is active in blind_styles and has at least one fabric.
+  get #types() {
+    const withFabrics = new Set(this.#fabrics.map((f) => f.blind_type));
+    if (!this.#styles.length) return [...withFabrics];
+    return this.#styles.map((s) => s.name).filter((n) => withFabrics.has(n));
+  }
+
+  #style(name) { return this.#styles.find((s) => s.name === name); }
   get #fabric() { return this.#fabrics.find((f) => f.id === this.#sel.fabricId); }
- 
+
   #pickType(type) {
     this.#sel.type = type;
     this.#pickFabric(this.#fabrics.find((f) => f.blind_type === type).id);
   }
- 
+
   #pickFabric(id) {
     const fabric = this.#fabrics.find((f) => f.id === id);
     this.#sel.fabricId = id;
     if (!fabric.colors.includes(this.#sel.color)) this.#sel.color = fabric.colors[0];
   }
- 
+
   #currentItem() {
     const s = this.#sel;
     return new CartItem({
@@ -61,7 +72,7 @@ export class StorefrontPage {
       casing: s.casing, acetate: s.acetate, quantity: s.quantity,
     });
   }
- 
+
   // ---------- layout ----------
   #draw() {
     const count = cart.items.reduce((s, i) => s + i.quantity, 0);
@@ -84,15 +95,15 @@ export class StorefrontPage {
     this.#root.querySelector("#out").addEventListener("click", () => this.#signOut());
     binders[this.#view]();
   }
- 
+
   #go(view) { this.#view = view; this.#draw(); scrollTo(0, 0); }
- 
+
   async #signOut() {
     await this.#auth.signOut();
     location.hash = "#/";
     location.reload();
   }
- 
+
   #toast(message) {
     const t = document.createElement("div");
     t.className = "toast";
@@ -100,7 +111,7 @@ export class StorefrontPage {
     document.body.append(t);
     setTimeout(() => t.remove(), 2000);
   }
- 
+
   // ---------- shop ----------
   #shopHtml() {
     const s = this.#sel;
@@ -110,13 +121,13 @@ export class StorefrontPage {
       <p class="sub">Choose a style, set the window size in inches, and show the customer the preview and price.</p>
       <div class="layout"><div class="stack" id="shop">
         <section class="card"><h3>Type of blinds</h3><div class="opts">
-          ${this.#types.map((t) => opt(t === s.type, `data-type="${esc(t)}"`, t, TYPE_NOTES[t])).join("")}</div></section>
+          ${this.#types.map((t) => opt(t === s.type, `data-type="${esc(t)}"`, t, this.#style(t)?.description)).join("")}</div></section>
         <section class="card"><h3>Fabric</h3><div class="opts">
           ${this.#fabrics.filter((f) => f.blind_type === s.type).map((f) =>
             opt(f.id === s.fabricId, `data-fabric="${f.id}"`, f.name, `${peso(f.price_per_sqft)} per sq ft`)).join("")}</div></section>
         <section class="card"><h3>Color</h3><div class="opts swatches">
           ${this.#fabric.colors.map((c) => `<div class="swl"><button type="button" class="sw ${c === s.color ? "on" : ""}"
-            style="background:${BlindPreview.hex(c)}" aria-label="${esc(c)}" data-color="${esc(c)}"></button>${esc(c)}</div>`).join("")}</div></section>
+            style="background:${BlindPreview.swatch(this.#fabric, c)}" aria-label="${esc(c)}" data-color="${esc(c)}"></button>${esc(c)}</div>`).join("")}</div></section>
         <section class="card"><h3>Size in inches</h3>
           <div class="two">
             <label>Width (in)<input name="width" type="number" min="12" max="120" value="${s.width}"></label>
@@ -128,7 +139,7 @@ export class StorefrontPage {
           <label class="check"><input name="acetate" type="checkbox" ${s.acetate ? "checked" : ""}> Add acetate cover (optional, ${peso(PricingService.ACETATE_FEE)})</label></section>
       </div><aside class="card sticky" id="quote"></aside></div>`;
   }
- 
+
   #bindShop() {
     const shop = this.#root.querySelector("#shop");
     shop.addEventListener("click", (e) => {
@@ -149,7 +160,7 @@ export class StorefrontPage {
     });
     this.#updateQuote();
   }
- 
+
   // Redraws only the side panel, so typing in the size boxes keeps its focus.
   #updateQuote() {
     const box = this.#root.querySelector("#quote");
@@ -157,7 +168,7 @@ export class StorefrontPage {
     const ok = item.isValid;
     const unit = ok ? PricingService.unitPrice(item) : 0;
     const area = ok ? PricingService.area(item) : 0;
-    box.innerHTML = `${BlindPreview.render(item)}<h3>Your blind</h3>
+    box.innerHTML = `${BlindPreview.render(item, this.#style(item.fabric.blind_type)?.image_path)}<h3>Your blind</h3>
       <div class="ln">Style<b>${esc(item.fabric.blind_type)}</b></div>
       <div class="ln">Fabric and color<b>${esc(item.fabric.name)}, ${esc(item.color)}</b></div>
       <div class="ln">Size<b>${item.width || 0} x ${item.height || 0} in</b></div>
@@ -168,8 +179,8 @@ export class StorefrontPage {
       <div class="tot"><span>Total</span><span>${peso(unit * item.quantity)}</span></div>
       ${ok ? "" : '<p class="err">Enter a width and height between 12 and 120 inches.</p>'}
       <div class="actions">
-        <button type="button" class="btn" id="add" ${ok ? "" : "disabled"}>Add to Quote</button>
-        <button type="button" class="btn ghost" data-go="cart">View Quote (${cart.items.length})</button>
+        <button type="button" class="btn" id="add" ${ok ? "" : "disabled"}>Add to cart</button>
+        <button type="button" class="btn ghost" data-go="cart">View cart (${cart.items.length})</button>
       </div>`;
     const step = (d) => { this.#sel.quantity = Math.max(1, this.#sel.quantity + d); this.#updateQuote(); };
     box.querySelector("#qm").addEventListener("click", () => step(-1));
@@ -182,7 +193,7 @@ export class StorefrontPage {
       this.#draw();
     });
   }
- 
+
   // ---------- cart (order summary) ----------
   #cartHtml() {
     if (cart.isEmpty) {
@@ -210,7 +221,7 @@ export class StorefrontPage {
           <button type="button" class="btn ghost" id="print">Print quote</button>
         </div></aside></div>`;
   }
- 
+
   #bindCart() {
     this.#root.querySelectorAll("[data-q]").forEach((b) => b.addEventListener("click", () => {
       const item = cart.items[Number(b.dataset.q)];
@@ -224,7 +235,7 @@ export class StorefrontPage {
     const print = this.#root.querySelector("#print");
     if (print) print.addEventListener("click", () => window.print());
   }
- 
+
   // ---------- customer details ----------
   #checkoutHtml() {
     return `<h1>Customer details</h1><p class="sub">Enter the customer's details to save this quotation and order.</p>
@@ -239,11 +250,11 @@ export class StorefrontPage {
         <p class="err" id="err"></p>
         <div class="actions"><button type="submit" class="btn">Save order</button></div></aside></form>`;
   }
- 
+
   #bindCheckout() {
     this.#root.querySelector("#checkout").addEventListener("submit", (e) => this.#placeOrder(e));
   }
- 
+
   async #placeOrder(e) {
     e.preventDefault();
     const form = e.target;
@@ -273,7 +284,7 @@ export class StorefrontPage {
       button.disabled = false;
     }
   }
- 
+
   // ---------- saved summary (screenshot or PDF) ----------
   #doneHtml() {
     const s = this.#saved;
@@ -304,7 +315,7 @@ export class StorefrontPage {
         <p class="note">In the print window, choose Save as PDF as the destination. You can also take a screenshot of this page.</p>
       </div>`;
   }
- 
+
   #bindDone() {
     this.#root.querySelector("#pdf").addEventListener("click", () => {
       const original = document.title;
@@ -314,4 +325,3 @@ export class StorefrontPage {
     });
   }
 }
- 
