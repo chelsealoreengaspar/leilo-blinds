@@ -5,6 +5,7 @@ import { CartItem } from "../models/CartItem.js";
 import { PricingService } from "../services/PricingService.js";
 import { StyleRepository } from "../repositories/StyleRepository.js";
 import { BlindPreview } from "../components/BlindPreview.js";
+import { Brand } from "../components/Brand.js";
 import { peso, esc } from "../utils/format.js";
 
 // One shared cart, so it survives when the admin switches pages and returns.
@@ -52,6 +53,14 @@ export class StorefrontPage {
   }
 
   #style(name) { return this.#styles.find((s) => s.name === name); }
+
+  // A blind type shown as a photo card: picture on the upper three quarters, name on the last quarter.
+  #typeCard(type) {
+    const st = this.#style(type);
+    const picture = st?.image_path ? `;background-image:url('${BlindPreview.src(st.image_path)}')` : "";
+    return `<button type="button" class="typecard ${type === this.#sel.type ? "on" : ""}" data-type="${esc(type)}" title="${esc(st?.description ?? "")}">
+      <span class="timg" style="${esc(`background-color:var(--tan)${picture}`)}"></span><span class="tname">${esc(type)}</span></button>`;
+  }
   get #fabric() { return this.#fabrics.find((f) => f.id === this.#sel.fabricId); }
 
   #pickType(type) {
@@ -86,7 +95,7 @@ export class StorefrontPage {
       checkout: () => this.#bindCheckout(), done: () => this.#bindDone(),
     };
     if (this.#view === "checkout" && cart.isEmpty) this.#view = "cart";
-    this.#root.innerHTML = `<header><div class="brand"><span class="dot"></span>Leilo Blinds</div>
+    this.#root.innerHTML = `<header>${Brand.html()}
       <nav>${tabs.map(([v, l]) => `<button type="button" class="tab ${this.#view === v || (v === "cart" && this.#view === "checkout") ? "on" : ""}" data-go="${v}">${l}</button>`).join("")}
       ${this.#role === "admin" ? '<a class="tab" href="#/admin">Admin</a>' : ""}
       <button type="button" class="tab" id="out">Sign out</button></nav></header>
@@ -120,8 +129,8 @@ export class StorefrontPage {
     return `<h1>New order</h1>
       <p class="sub">Choose a style, set the window size in inches, and show the customer the preview and price.</p>
       <div class="layout"><div class="stack" id="shop">
-        <section class="card"><h3>Type of blinds</h3><div class="opts">
-          ${this.#types.map((t) => opt(t === s.type, `data-type="${esc(t)}"`, t, this.#style(t)?.description)).join("")}</div></section>
+        <section class="card"><h3>Type of blinds</h3><div class="typegrid">
+          ${this.#types.map((t) => this.#typeCard(t)).join("")}</div></section>
         <section class="card"><h3>Fabric</h3><div class="opts">
           ${this.#fabrics.filter((f) => f.blind_type === s.type).map((f) =>
             opt(f.id === s.fabricId, `data-fabric="${f.id}"`, f.name, `${peso(f.price_per_sqft)} per sq ft`)).join("")}</div></section>
@@ -291,7 +300,7 @@ export class StorefrontPage {
     const c = s.customer;
     return `<article class="card receipt">
         <div class="rhead">
-          <div><div class="brand"><span class="dot"></span>Leilo Blinds</div><p class="note">Quotation and order</p></div>
+          <div>${Brand.html()}<p class="note">Quotation and order</p></div>
           <div class="rmeta"><b>${esc(s.no)}</b><div class="note">${esc(s.date)}</div></div>
         </div>
         <section><h3>Customer</h3>
