@@ -188,8 +188,8 @@ export class StorefrontPage {
       <div class="tot"><span>Total</span><span>${peso(unit * item.quantity)}</span></div>
       ${ok ? "" : '<p class="err">Enter a width and height between 12 and 120 inches.</p>'}
       <div class="actions">
-        <button type="button" class="btn" id="add" ${ok ? "" : "disabled"}>Add to cart</button>
-        <button type="button" class="btn ghost" data-go="cart">View cart (${cart.items.length})</button>
+        <button type="button" class="btn" id="add" ${ok ? "" : "disabled"}>Add to Quote</button>
+        <button type="button" class="btn ghost" data-go="cart">View Quote (${cart.items.length})</button>
       </div>`;
     const step = (d) => { this.#sel.quantity = Math.max(1, this.#sel.quantity + d); this.#updateQuote(); };
     box.querySelector("#qm").addEventListener("click", () => step(-1));

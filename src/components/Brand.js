@@ -3,7 +3,7 @@ import { esc } from "../utils/format.js";
 // One place to change the logo and the shop name shown in every header.
 const LOGO = "/branding/logo.png";   // file in public/branding/
 const NAME = "Leilo Blinds";
-const SHOW_NAME = true;              // set to false if your logo picture already contains the words
+const SHOW_NAME = false;              // set to false if your logo picture already contains the words
 
 export class Brand {
   static html(suffix = "") {
