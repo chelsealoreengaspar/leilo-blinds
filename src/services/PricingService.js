@@ -1,6 +1,6 @@
 // Shows the live quote. The database recalculates the real price on checkout.
 export class PricingService {
-  static MIN_AREA_SQFT = 6;
+  static MIN_AREA_SQFT = 15;
   static CASING_PER_FT = { Plastic: 35, Metal: 85 };
   static ACETATE_FEE = 120;
 

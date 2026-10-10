@@ -6,7 +6,7 @@ import { SHOP, ACK } from "../config/ShopInfo.js";
 
 const STATUSES = ["Pending", "Completed", "Cancelled"];
 const CHARGE_LABELS = ["Installation fee", "Transportation", "Other"];
-// Peso amount that keeps centavos and negative values (for example a discount).
+
 const money = (n) => {
   const v = Number(n);
   const text = Math.abs(v).toLocaleString("en-US", { minimumFractionDigits: Number.isInteger(v) ? 0 : 2, maximumFractionDigits: 2 });
@@ -31,10 +31,14 @@ export class AdminPage {
     this.#draw();
   }
 
-  // Runs a change, reloads the orders, and redraws the page.
   async #run(action) {
-    try { await action(); this.#orders = await this.#repo.listAll(); this.#draw(); }
-    catch (err) { alert(err.message); }
+    try { 
+      await action(); 
+      this.#orders = await this.#repo.listAll(); 
+      this.#draw(); 
+    } catch (err) { 
+      alert(err.message); 
+    }
   }
 
   #draw() {
@@ -67,22 +71,28 @@ export class AdminPage {
 
   #orderHtml(o) {
     const charges = o.order_charges ?? [];
-    return `<article class="card">
+    const isCancelled = o.status === "Cancelled";
+
+    return `<article class="card ${isCancelled ? "locked" : ""}">
       <div class="ohead"><div><b>${esc(o.order_no)}</b> <span class="pill ${o.status.toLowerCase()}">${esc(o.status)}</span>
         <div class="note">${esc(o.customer_name)}${o.phone ? ", " + esc(o.phone) : ""}</div>
         ${o.address ? `<div class="note">${esc(o.address)}</div>` : ""}
         <div class="note">Agent: ${esc(o.agent_email ?? "not recorded")}, created ${esc(o.created_at.slice(0, 10))}</div>
         ${o.notes ? `<div class="note">Notes: ${esc(o.notes)}</div>` : ""}</div>
         <b class="big">${money(ReportService.grandTotal(o))}</b></div>
-      ${o.order_items.map((i) => `<div class="ln"><span>${i.quantity} x ${esc(i.blind_type)}, ${esc(i.fabric_name)}, ${esc(i.color)}, ${i.width_in} x ${i.height_in} in, ${esc(i.casing)}${i.acetate ? ", acetate cover" : ""}</span><b>${peso(i.unit_price * i.quantity)}</b></div>`).join("")}
+      ${o.order_items.map((i) => `<div class="ln"><span>${i.quantity} x ${esc(i.blind_type)},${esc(i.fabric_name)}, ${esc(i.color)},${i.width_in} x ${i.height_in} in,${esc(i.casing)}${i.acetate ? ", acetate cover" : ""}</span><b>${peso(i.unit_price * i.quantity)}</b></div>`).join("")}
       <div class="ln"><span>Items subtotal</span><b>${money(o.total)}</b></div>
-      ${charges.map((c) => `<div class="ln"><span>${esc(c.label)}</span><span><b>${money(c.amount)}</b> <button type="button" class="link" data-rmcharge="${c.id}">Remove</button></span></div>`).join("")}
-      <form class="chargeform" data-order="${o.id}">
-        <input name="label" list="labels" placeholder="Installation fee" required>
-        <input name="amount" type="number" step="0.01" placeholder="Amount" required>
-        <button class="btn fit">Add charge</button>
-      </form>
-      <div class="opts">${STATUSES.map((s) => `<button type="button" class="opt ${o.status === s ? "on" : ""}" data-status="${s}" data-id="${o.id}">${s}</button>`).join("")}</div>
+      ${charges.map((c) => `<div class="ln"><span>${esc(c.label)}</span><span><b>${money(c.amount)}</b>${!isCancelled ? `<button type="button" class="link" data-rmcharge="${c.id}">Remove</button>` : ""}</span></div>`).join("")}
+      
+      ${!isCancelled ? `
+        <form class="chargeform" data-order="${o.id}">
+          <input name="label" list="labels" placeholder="Installation fee" required>
+          <input name="amount" type="number" step="0.01" placeholder="Amount" required>
+          <button class="btn fit">Add charge</button>
+        </form>
+        <div class="opts">${STATUSES.map((s) => `<button type="button" class="opt ${o.status === s ? "on" : ""}" data-status="${s}" data-id="${o.id}">${s}</button>`).join("")}</div>
+      ` : `<div class="note"><b>Order Cancelled</b>.</div>`}
+
       ${o.status === "Completed" ? `<button type="button" class="btn ghost fit" data-ack="${o.id}">Print acknowledgement</button>` : ""}
     </article>`;
   }
@@ -100,7 +110,6 @@ export class AdminPage {
     });
   }
 
-  // ---------- acknowledgement (screenshot or PDF) ----------
   #drawAck() {
     const o = this.#orders.find((x) => x.id === this.#ackId);
     if (!o || o.status !== "Completed") { this.#ackId = null; this.#draw(); return; }
@@ -145,8 +154,8 @@ export class AdminPage {
       <section><h3>Order</h3>
         <table class="rtable"><tr><th>Item</th><th>Size</th><th class="num">Qty</th><th class="num">Unit price</th><th class="num">Amount</th></tr>
           ${o.order_items.map((i) => `<tr>
-            <td><b>${esc(i.blind_type)}</b><div class="note">${esc(i.fabric_name)}, ${esc(i.color)}, ${esc(i.casing)} casing${i.acetate ? ", acetate cover" : ""}</div></td>
-            <td>${i.width_in} x ${i.height_in} in</td><td class="num">${i.quantity}</td>
+            <td><b>${esc(i.blind_type)}</b><div class="note">${esc(i.fabric_name)},${esc(i.color)}, ${esc(i.casing)} casing${i.acetate ? ", acetate cover" : ""}</div></td>
+            <td>${i.width_in} x${i.height_in} in</td><td class="num">${i.quantity}</td>
             <td class="num">${money(i.unit_price)}</td><td class="num">${money(i.unit_price * i.quantity)}</td></tr>`).join("")}
         </table></section>
       <section class="ack-sum">
