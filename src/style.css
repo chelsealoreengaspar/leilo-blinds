@@ -11,11 +11,11 @@
   --soft: #f1eae2;             /* light tint for selected items */
   --acc: var(--brown);
 
-  --radius: 4px;               /* corner roundness of buttons, cards and inputs (0 = square) */
+  --radius: 6px;               /* corner roundness of buttons, cards and inputs (0 = square) */
   --round: 50%;                /* color swatches and the + / - buttons; use var(--radius) to make them square */
 
   --bg-image: url("/branding/background.jpg");
-  --bg-opacity: 0.12;          /* 0 hides the background picture, 1 shows it fully */
+  --bg-opacity: 0.9;          /* 0 hides the background picture, 1 shows it fully */
 
   --login-image: url("/branding/login.gif");
   --login-shade: rgba(59, 40, 29, 0.35);   /* dark layer over the GIF so the form stays readable */
@@ -38,7 +38,7 @@ h3 { font-size: 15px; font-weight: 600; margin: 0 0 4px; }
 header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 10px 24px; background: rgba(255, 255, 255, 0.94); border-bottom: 1px solid var(--line); }
 header a { color: var(--acc); text-decoration: none; }
 .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 18px; }
-.logo { height: 40px; width: auto; display: block; }
+.logo { height: 60px; width: auto; display: block; }
 nav { display: flex; gap: 4px; flex-wrap: wrap; }
 main { width: 100%; max-width: 1060px; margin: 0 auto; padding: 24px 20px 60px; flex: 1; }
 

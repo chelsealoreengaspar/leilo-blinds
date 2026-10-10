@@ -18,8 +18,8 @@ export class LoginPage {
     this.#root.innerHTML = `<header>${Brand.html()}</header>
       <div class="login">
         <form id="login" class="card login-card">
-          <h1>Staff sign in</h1>
-          <p class="sub">This order form is for sales staff only.</p>
+          <h1>Staff and Admin Sign In</h1>
+          <p class="sub">This order form is for sales staff and admin only.</p>
           <label>Username<input name="username" required autocomplete="username" autocapitalize="none"></label>
           <label>Password<input name="password" type="password" required autocomplete="current-password"></label>
           <button class="btn">Sign in</button>
