@@ -32,12 +32,12 @@ export class AdminPage {
   }
 
   async #run(action) {
-    try { 
-      await action(); 
-      this.#orders = await this.#repo.listAll(); 
-      this.#draw(); 
-    } catch (err) { 
-      alert(err.message); 
+    try {
+      await action();
+      this.#orders = await this.#repo.listAll();
+      this.#draw();
+    } catch (err) {
+      alert(err.message);
     }
   }
 
@@ -69,6 +69,12 @@ export class AdminPage {
       ${list.length ? list.map((o) => this.#orderHtml(o)).join("") : '<p class="note">No orders here yet.</p>'}`;
   }
 
+  // Who saved the order: the typed name (guest account) with the login, or just the login.
+  #agentHtml(o) {
+    const login = o.agent_email ?? "not recorded";
+    return o.agent_name ? `<b>${esc(o.agent_name)}</b> (${esc(login)})` : esc(login);
+  }
+
   #orderHtml(o) {
     const charges = o.order_charges ?? [];
     const isCancelled = o.status === "Cancelled";
@@ -77,13 +83,13 @@ export class AdminPage {
       <div class="ohead"><div><b>${esc(o.order_no)}</b> <span class="pill ${o.status.toLowerCase()}">${esc(o.status)}</span>
         <div class="note">${esc(o.customer_name)}${o.phone ? ", " + esc(o.phone) : ""}</div>
         ${o.address ? `<div class="note">${esc(o.address)}</div>` : ""}
-        <div class="note">Agent: ${esc(o.agent_email ?? "not recorded")}, created ${esc(o.created_at.slice(0, 10))}</div>
+        <div class="note">Agent: ${this.#agentHtml(o)}, created ${esc(o.created_at.slice(0, 10))}</div>
         ${o.notes ? `<div class="note">Notes: ${esc(o.notes)}</div>` : ""}</div>
         <b class="big">${money(ReportService.grandTotal(o))}</b></div>
-      ${o.order_items.map((i) => `<div class="ln"><span>${i.quantity} x ${esc(i.blind_type)},${esc(i.fabric_name)}, ${esc(i.color)},${i.width_in} x ${i.height_in} in,${esc(i.casing)}${i.acetate ? ", acetate cover" : ""}</span><b>${peso(i.unit_price * i.quantity)}</b></div>`).join("")}
+      ${o.order_items.map((i) => `<div class="ln"><span>${i.quantity} x ${esc(i.blind_type)}, ${esc(i.fabric_name)}, ${esc(i.color)}, ${i.width_in} x ${i.height_in} in, ${esc(i.casing)}${i.acetate ? ", acetate cover" : ""}</span><b>${peso(i.unit_price * i.quantity)}</b></div>`).join("")}
       <div class="ln"><span>Items subtotal</span><b>${money(o.total)}</b></div>
-      ${charges.map((c) => `<div class="ln"><span>${esc(c.label)}</span><span><b>${money(c.amount)}</b>${!isCancelled ? `<button type="button" class="link" data-rmcharge="${c.id}">Remove</button>` : ""}</span></div>`).join("")}
-      
+      ${charges.map((c) => `<div class="ln"><span>${esc(c.label)}</span><span><b>${money(c.amount)}</b>${!isCancelled ? ` <button type="button" class="link" data-rmcharge="${c.id}">Remove</button>` : ""}</span></div>`).join("")}
+
       ${!isCancelled ? `
         <form class="chargeform" data-order="${o.id}">
           <input name="label" list="labels" placeholder="Installation fee" required>
@@ -154,8 +160,8 @@ export class AdminPage {
       <section><h3>Order</h3>
         <table class="rtable"><tr><th>Item</th><th>Size</th><th class="num">Qty</th><th class="num">Unit price</th><th class="num">Amount</th></tr>
           ${o.order_items.map((i) => `<tr>
-            <td><b>${esc(i.blind_type)}</b><div class="note">${esc(i.fabric_name)},${esc(i.color)}, ${esc(i.casing)} casing${i.acetate ? ", acetate cover" : ""}</div></td>
-            <td>${i.width_in} x${i.height_in} in</td><td class="num">${i.quantity}</td>
+            <td><b>${esc(i.blind_type)}</b><div class="note">${esc(i.fabric_name)}, ${esc(i.color)}, ${esc(i.casing)} casing${i.acetate ? ", acetate cover" : ""}</div></td>
+            <td>${i.width_in} x ${i.height_in} in</td><td class="num">${i.quantity}</td>
             <td class="num">${money(i.unit_price)}</td><td class="num">${money(i.unit_price * i.quantity)}</td></tr>`).join("")}
         </table></section>
       <section class="ack-sum">

@@ -18,6 +18,7 @@ export class StorefrontPage {
   #orders = new OrderRepository();
   #fabrics = [];
   #styles = [];
+  #askAgent = false;   // true for shared accounts (such as guest) that must type the agent's name
   #view = "shop";
   #saved = null;
   #sel = { type: null, fabricId: null, color: null, width: 48, height: 60, casing: "Plastic", acetate: false, quantity: 1 };
@@ -36,6 +37,8 @@ export class StorefrontPage {
     }
     try { this.#styles = await new StyleRepository().list(); }
     catch { this.#styles = []; }
+    try { this.#askAgent = await this.#auth.needsAgentName(); }
+    catch { this.#askAgent = false; }
     if (!this.#types.length) {
       this.#root.innerHTML = "<main><h1>No blind styles available</h1><p>Check the blind_styles and fabrics tables in Supabase.</p></main>";
       return;
@@ -253,6 +256,9 @@ export class StorefrontPage {
           <div class="two"><label>Full name<input name="name" required></label><label>Contact number<input name="phone" type="tel" required></label></div>
           <label>Address<textarea name="address" rows="2" required></textarea></label>
           <label>Notes (optional)<textarea name="notes" rows="2" placeholder="Room, preferred install date, and so on"></textarea></label></section>
+        ${this.#askAgent ? `<section class="card"><h3>Agent</h3>
+          <label>Your name<input name="agent_name" required maxlength="80" autocomplete="off" placeholder="Name of the person saving this order"></label>
+          <p class="note">This is saved with the order so the admin can see who took it.</p></section>` : ""}
       </div><aside class="card sticky"><h3>Order</h3>
         ${cart.items.map((i) => `<div class="ln"><span>${i.quantity} x ${esc(i.fabric.blind_type)}, ${i.width} x ${i.height} in</span><b>${peso(PricingService.lineTotal(i))}</b></div>`).join("")}
         <div class="tot"><span>Total</span><span>${peso(cart.subtotal)}</span></div>
@@ -272,6 +278,10 @@ export class StorefrontPage {
     for (const k of Object.keys(customer)) customer[k] = String(customer[k]).trim();
     if (!customer.name || !customer.phone || !customer.address) {
       form.querySelector("#err").textContent = "Enter the customer's name, contact number, and address.";
+      return;
+    }
+    if (this.#askAgent && !customer.agent_name) {
+      form.querySelector("#err").textContent = "Enter your name as the agent.";
       return;
     }
     button.disabled = true;

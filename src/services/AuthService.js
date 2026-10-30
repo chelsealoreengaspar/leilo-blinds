@@ -22,4 +22,13 @@ export class AuthService {
     if (error) throw error;
     return data ?? null;
   }
+
+  // True for shared accounts (such as the guest login) that must type the
+  // agent's name on every order. Set per account in staff.ask_agent_name.
+  async needsAgentName() {
+    if (!(await this.isSignedIn())) return false;
+    const { data, error } = await this.#db.rpc("my_needs_agent_name");
+    if (error) throw error;
+    return Boolean(data);
+  }
 }
